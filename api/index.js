@@ -61,8 +61,18 @@ module.exports = async (req, res) => {
         return res.status(200).end();
     }
 
+    let urlToScrape;
     if (req.method === "GET") {
-        const docHTML = `
+        urlToScrape = req.query?.url;
+        if (!urlToScrape) {
+            try {
+                const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+                urlToScrape = parsedUrl.searchParams.get("url");
+            } catch (e) {}
+        }
+        
+        if (!urlToScrape) {
+            const docHTML = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -84,9 +94,13 @@ module.exports = async (req, res) => {
         <h1>Product Extractor API</h1>
         <p>A fast, cached, and concurrent API to extract product images from e-commerce URLs like Amazon and Meesho.</p>
         
+        <div class="endpoint">GET /?url=...</div>
         <div class="endpoint">POST /</div>
         
-        <h3>Request Body (JSON)</h3>
+        <h3>GET Example</h3>
+        <pre><code>GET /?url=https://www.amazon.in/dp/B0CHX1W1XY</code></pre>
+        
+        <h3>POST Request Body (JSON)</h3>
         <pre><code>{
   "url": "https://www.amazon.in/dp/B0CHX1W1XY"
 }</code></pre>
@@ -102,19 +116,20 @@ module.exports = async (req, res) => {
     </div>
 </body>
 </html>`;
-        res.setHeader("Content-Type", "text/html");
-        return res.status(200).send ? res.status(200).send(docHTML) : res.status(200).end(docHTML);
+            res.setHeader("Content-Type", "text/html");
+            return res.status(200).send ? res.status(200).send(docHTML) : res.status(200).end(docHTML);
+        }
+    } else if (req.method === "POST") {
+        urlToScrape = req.body?.url;
+    } else {
+        return res.status(405).json({ success: false, message: "Method Not Allowed. Use GET or POST." });
     }
 
-    if (req.method !== "POST") {
-        return res.status(405).json({ success: false, message: "Method Not Allowed. Use POST for extraction or GET for documentation." });
-    }
-
-    let { url } = req.body;
-
-    if (!url) {
+    if (!urlToScrape) {
         return res.status(400).json({ success: false, message: "URL parameter is required." });
     }
+
+    let url = urlToScrape;
 
     url = url.trim();
 
