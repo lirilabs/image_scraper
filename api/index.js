@@ -394,16 +394,44 @@ module.exports = async (req, res) => {
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
                 "Accept-Encoding": "gzip, deflate, br",
-                "Connection": "keep-alive"
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Referer": "https://www.google.com/"
             },
-            timeout: 8000,
-            maxRedirects: 3,
+            timeout: 15000,
+            maxRedirects: 5,
             httpAgent,
-            httpsAgent
+            httpsAgent,
+            validateStatus: (status) => status < 500 // let us inspect 403/503 bodies too
         });
 
-        const $ = cheerio.load(response.data);
+        const rawHtml = typeof response.data === "string" ? response.data : "";
+        const bodyLower = rawHtml.slice(0, 3000).toLowerCase();
+        const looksBlocked =
+            bodyLower.includes("robot check") ||
+            bodyLower.includes("captcha") ||
+            bodyLower.includes("access denied") ||
+            bodyLower.includes("are you a human") ||
+            bodyLower.includes("unusual traffic") ||
+            (response.status >= 400);
+
+        if (looksBlocked) {
+            console.error(`[scraper] Blocked/challenged by ${hostname} - status ${response.status}`);
+            return res.status(502).json({
+                success: false,
+                message: `${hostname} blocked this request (bot/CAPTCHA check, status ${response.status}). This site actively blocks server-side scraping; a headless browser with residential proxy/session cookies would be needed to get past it.`
+            });
+        }
+
+        const $ = cheerio.load(rawHtml);
         const imageSet = extractAllImages($, hostname);
+
+        if (imageSet.size === 0) {
+            console.error(`[scraper] No images found for ${hostname} - page loaded but selectors/JSON-LD/meta all empty. Likely a JS-rendered SPA.`);
+        }
 
         const finalImages = Array.from(imageSet)
             .map((imgUrl) => {
@@ -424,10 +452,13 @@ module.exports = async (req, res) => {
             count: finalImages.length
         });
     } catch (err) {
+        console.error(`[scraper] Error scraping ${url}:`, err.code || "", err.message);
         if (err.response) {
             return res.status(err.response.status).json({ success: false, message: `Target failed with status ${err.response.status}` });
-        } else if (err.code === "ECONNABORTED") {
+        } else if (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT") {
             return res.status(504).json({ success: false, message: "Target website timed out." });
+        } else if (err.code === "ENOTFOUND" || err.code === "ECONNREFUSED") {
+            return res.status(502).json({ success: false, message: `Could not reach ${url} - check the URL is correct and reachable.` });
         }
         return res.status(500).json({ success: false, message: "Parsing error.", error: err.message });
     }
