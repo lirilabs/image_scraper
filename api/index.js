@@ -187,13 +187,7 @@ module.exports = async (req, res) => {
             });
         }
 
-        // Generic gathering for all other images on page
-        $("img").each((_, img) => {
-            let src = $(img).attr("src") || $(img).attr("data-src") || $(img).attr("data-lazy");
-            if (src && !src.startsWith("data:image") && !src.includes("svg") && !src.includes("pixel")) {
-                images.add(src);
-            }
-        });
+
 
         let finalImages = Array.from(images).map(imgUrl => {
             try {
